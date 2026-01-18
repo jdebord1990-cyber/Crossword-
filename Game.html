@@ -1,0 +1,516 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Mobile Crossword</title>
+    <style>
+        :root {
+            --cell-size: 13vw; /* Scales with screen width */
+            --max-cell-size: 50px;
+            --highlight-color: #a4d3ee;
+            --secondary-highlight: #eef7fc;
+            --border-color: #333;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            background-color: #f8f9fa;
+            height: 100vh;
+        }
+
+        header {
+            padding: 10px;
+            background: #333;
+            color: white;
+            width: 100%;
+            text-align: center;
+            font-size: 1.2rem;
+        }
+
+        /* Game Container */
+        #game-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            width: 100%;
+            padding: 10px 0;
+            flex: 1;
+        }
+
+        /* The Grid */
+        #grid {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr); /* 5x5 Grid */
+            gap: 1px;
+            background-color: #333;
+            border: 2px solid #333;
+            margin-bottom: 15px;
+        }
+
+        .cell {
+            width: var(--cell-size);
+            height: var(--cell-size);
+            max-width: var(--max-cell-size);
+            max-height: var(--max-cell-size);
+            background-color: white;
+            position: relative;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 1.5rem;
+            font-weight: bold;
+            text-transform: uppercase;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .cell.black {
+            background-color: #333;
+            pointer-events: none;
+        }
+
+        /* Number in the corner */
+        .cell .number {
+            position: absolute;
+            top: 2px;
+            left: 2px;
+            font-size: 0.6rem;
+            font-weight: normal;
+            color: #666;
+            line-height: 1;
+        }
+
+        /* Highlights */
+        .cell.selected {
+            background-color: var(--highlight-color);
+        }
+        
+        .cell.related {
+            background-color: var(--secondary-highlight);
+        }
+
+        /* Active Clue Bar (Sticky helper) */
+        #active-clue-bar {
+            background-color: #e8f0fe;
+            border-top: 2px solid #333;
+            border-bottom: 2px solid #333;
+            padding: 15px;
+            width: 90%;
+            text-align: center;
+            font-weight: bold;
+            font-size: 1.1rem;
+            margin-bottom: 10px;
+            border-radius: 8px;
+            min-height: 1.2em;
+        }
+
+        /* Full Clue List */
+        #clue-list {
+            display: flex;
+            width: 95%;
+            justify-content: space-around;
+            font-size: 0.9rem;
+            overflow-y: auto;
+            max-height: 30vh;
+        }
+
+        .clue-column {
+            width: 45%;
+        }
+
+        h3 {
+            margin: 0 0 5px 0;
+            border-bottom: 1px solid #ccc;
+        }
+
+        ul {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+
+        li {
+            padding: 4px 0;
+            color: #555;
+        }
+
+        li.active-clue-text {
+            color: #000;
+            font-weight: bold;
+            background-color: #d1e7dd;
+            border-radius: 4px;
+            padding-left: 5px;
+        }
+
+        /* Controls */
+        #controls {
+            margin-top: 10px;
+            padding-bottom: 20px;
+        }
+
+        button {
+            padding: 10px 20px;
+            font-size: 1rem;
+            background-color: #333;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        
+        button:active {
+            background-color: #555;
+        }
+
+        /* Hidden input for mobile keyboard triggering */
+        #hidden-input {
+            position: absolute;
+            opacity: 0;
+            top: -1000px;
+        }
+    </style>
+</head>
+<body>
+
+<header>Mini Crossword</header>
+
+<div id="game-container">
+    <div id="grid">
+        </div>
+
+    <div id="active-clue-bar">Select a cell to start</div>
+
+    <div id="clue-list">
+        <div class="clue-column">
+            <h3>Across</h3>
+            <ul id="across-clues"></ul>
+        </div>
+        <div class="clue-column">
+            <h3>Down</h3>
+            <ul id="down-clues"></ul>
+        </div>
+    </div>
+    
+    <div id="controls">
+        <button onclick="checkAnswers()">Check Puzzle</button>
+    </div>
+</div>
+
+<input type="text" id="hidden-input" autocomplete="off">
+
+<script>
+    // --- 1. Game Configuration (5x5 Grid) ---
+    // 0 = empty/white, 1 = black block
+    const layout = [
+        [0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0],
+        [0, 0, 1, 0, 0],
+        [0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0]
+    ];
+
+    const numbers = [
+        [1, 2, 3, 4, 5],
+        [6, 0, 0, 0, 0],
+        [7, 0, null, 8, 0],
+        [9, 0, 0, 0, 0],
+        [10, 0, 0, 0, 0]
+    ];
+
+    const solution = [
+        ['H', 'E', 'A', 'R', 'T'],
+        ['O', 'M', 'G', 'E', 'R'], // Fake words for demo
+        ['M', 'A', null, 'D', 'A'],
+        ['E', 'I', 'G', 'H', 'T'],
+        ['S', 'L', 'E', 'E', 'P']
+    ];
+
+    // NOTE: In a real game, you'd map these IDs to the grid coordinates precisely.
+    // For this demo, I am using a simplified structure for the clues.
+    const clues = {
+        across: [
+            { num: 1, text: "Pump organ of the body", row: 0, col: 0 },
+            { num: 6, text: "Texting shock (abbr.) + 'ER'", row: 1, col: 0 },
+            { num: 7, text: "Mother (informal)", row: 2, col: 0 },
+            { num: 8, text: "District Attorney (abbr.)", row: 2, col: 3 },
+            { num: 9, text: "Number after seven", row: 3, col: 0 },
+            { num: 10, text: "Rest at night", row: 4, col: 0 },
+        ],
+        down: [
+            { num: 1, text: "Houses", row: 0, col: 0 },
+            { num: 2, text: "Sending an ___", row: 0, col: 1 },
+            { num: 3, text: "Silver symbol (Ag)", row: 0, col: 2 },
+            { num: 4, text: "Color of blood", row: 0, col: 3 },
+            { num: 5, text: "Trap for animals", row: 0, col: 4 },
+        ]
+    };
+
+    // --- 2. State Management ---
+    let currentRow = 0;
+    let currentCol = 0;
+    let direction = 'across'; // 'across' or 'down'
+    let gridState = Array(5).fill().map(() => Array(5).fill('')); // Stores user input
+
+    const gridEl = document.getElementById('grid');
+    const inputEl = document.getElementById('hidden-input');
+    const activeClueEl = document.getElementById('active-clue-bar');
+
+    // --- 3. Initialization ---
+    function initGame() {
+        renderGrid();
+        renderClues();
+        // Setup hidden input listener
+        inputEl.addEventListener('input', handleInput);
+        inputEl.addEventListener('keydown', handleSpecialKeys);
+    }
+
+    function renderGrid() {
+        gridEl.innerHTML = '';
+        layout.forEach((row, rIndex) => {
+            row.forEach((cellType, cIndex) => {
+                const cell = document.createElement('div');
+                cell.className = cellType === 1 ? 'cell black' : 'cell';
+                cell.dataset.row = rIndex;
+                cell.dataset.col = cIndex;
+
+                if (cellType === 0) {
+                    // Add Number if exists
+                    const num = numbers[rIndex][cIndex];
+                    if (num) {
+                        const numSpan = document.createElement('span');
+                        numSpan.className = 'number';
+                        numSpan.innerText = num;
+                        cell.appendChild(numSpan);
+                    }
+                    
+                    // Add click event
+                    cell.addEventListener('click', () => onCellClick(rIndex, cIndex));
+                }
+                gridEl.appendChild(cell);
+            });
+        });
+    }
+
+    function renderClues() {
+        const acrossList = document.getElementById('across-clues');
+        const downList = document.getElementById('down-clues');
+
+        clues.across.forEach(c => {
+            const li = document.createElement('li');
+            li.id = `across-${c.num}`;
+            li.innerText = `${c.num}. ${c.text}`;
+            acrossList.appendChild(li);
+        });
+
+        clues.down.forEach(c => {
+            const li = document.createElement('li');
+            li.id = `down-${c.num}`;
+            li.innerText = `${c.num}. ${c.text}`;
+            downList.appendChild(li);
+        });
+    }
+
+    // --- 4. Interactions ---
+
+    function onCellClick(r, c) {
+        // Toggle direction if clicking the same cell
+        if (r === currentRow && c === currentCol) {
+            direction = direction === 'across' ? 'down' : 'across';
+        } else {
+            currentRow = r;
+            currentCol = c;
+        }
+        
+        updateHighlights();
+        triggerKeyboard();
+    }
+
+    function triggerKeyboard() {
+        inputEl.focus();
+    }
+
+    function updateHighlights() {
+        // Clear previous
+        document.querySelectorAll('.cell').forEach(c => {
+            c.classList.remove('selected', 'related');
+        });
+        document.querySelectorAll('li').forEach(li => li.classList.remove('active-clue-text'));
+
+        // Highlight active cell
+        const activeCell = getCellEl(currentRow, currentCol);
+        if(activeCell) activeCell.classList.add('selected');
+
+        // Identify current clue based on direction
+        // Simple logic: Find the clue that starts before or at current pos
+        let currentClueObj = findCurrentClue(currentRow, currentCol, direction);
+        
+        // Highlight word (Simple implementation: just traverse)
+        if(currentClueObj) {
+            highlightWord(currentClueObj);
+            displayActiveClue(currentClueObj);
+        }
+    }
+
+    function findCurrentClue(r, c, dir) {
+        // Logic to find which clue encompasses the current cell
+        // In a complex app, we'd pre-calculate this.
+        // Here, we look at the clue list and see if the current cell falls in range.
+        const list = dir === 'across' ? clues.across : clues.down;
+        
+        // Simplification for demo: Find the clue with the highest start index 
+        // that is <= current index in the current row/col
+        let bestMatch = null;
+        
+        for (let clue of list) {
+            if (dir === 'across') {
+                if (clue.row === r && clue.col <= c) {
+                     // Check if there is a black block between clue start and current cell
+                     if (!hasBlockBetween(r, clue.col, c, 'across')) {
+                         bestMatch = clue;
+                     }
+                }
+            } else {
+                if (clue.col === c && clue.row <= r) {
+                    if (!hasBlockBetween(clue.row, c, r, 'down')) {
+                        bestMatch = clue;
+                    }
+                }
+            }
+        }
+        return bestMatch;
+    }
+
+    function hasBlockBetween(start, startIdx, endIdx, dir) {
+        // Check if a black cell exists between the clue start and the cursor
+        for (let i = startIdx; i <= endIdx; i++) {
+            let r = dir === 'across' ? start : i;
+            let c = dir === 'across' ? i : start;
+            if (layout[r][c] === 1) return true;
+        }
+        return false;
+    }
+
+    function highlightWord(clueObj) {
+        // Walk from clue start until we hit a block or edge
+        let r = clueObj.row;
+        let c = clueObj.col;
+        
+        while (r < 5 && c < 5 && layout[r][c] !== 1) {
+            const cell = getCellEl(r, c);
+            if (cell) cell.classList.add('related');
+            
+            if (direction === 'across') c++;
+            else r++;
+        }
+    }
+
+    function displayActiveClue(clueObj) {
+        activeClueEl.innerText = `${clueObj.num} ${direction.toUpperCase()}: ${clueObj.text}`;
+        
+        // Highlight in list
+        const listId = `${direction}-${clueObj.num}`;
+        const listItem = document.getElementById(listId);
+        if(listItem) {
+            listItem.classList.add('active-clue-text');
+            listItem.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+    }
+
+    // --- 5. Input Handling ---
+
+    function handleInput(e) {
+        const val = e.target.value;
+        if (!val) return; // Ignore empty
+
+        const char = val.slice(-1).toUpperCase(); // Get last char
+        
+        if (/[A-Z]/.test(char)) {
+            // Update State
+            gridState[currentRow][currentCol] = char;
+            
+            // Update DOM (be careful not to wipe the number)
+            const cell = getCellEl(currentRow, currentCol);
+            // Keep number span if exists
+            const numSpan = cell.querySelector('.number');
+            cell.innerText = char;
+            if (numSpan) cell.appendChild(numSpan);
+            
+            moveCursor(1);
+        }
+        
+        // Reset input so it can capture next char
+        inputEl.value = '';
+    }
+
+    function handleSpecialKeys(e) {
+        if (e.key === 'Backspace') {
+            // Clear current, move back
+            gridState[currentRow][currentCol] = '';
+            const cell = getCellEl(currentRow, currentCol);
+            const numSpan = cell.querySelector('.number');
+            cell.innerText = '';
+            if (numSpan) cell.appendChild(numSpan);
+            
+            moveCursor(-1);
+            e.preventDefault();
+        }
+    }
+
+    function moveCursor(step) {
+        // step = 1 (forward) or -1 (back)
+        let r = currentRow;
+        let c = currentCol;
+        
+        // Simple move logic
+        if (direction === 'across') {
+            c += step;
+        } else {
+            r += step;
+        }
+
+        // Boundary Checks
+        if (r >= 0 && r < 5 && c >= 0 && c < 5) {
+            // If black cell, stop or skip (simplified: stop)
+            if (layout[r][c] === 0) {
+                currentRow = r;
+                currentCol = c;
+                updateHighlights();
+            }
+        }
+    }
+
+    function getCellEl(r, c) {
+        return document.querySelector(`.cell[data-row='${r}'][data-col='${c}']`);
+    }
+
+    function checkAnswers() {
+        let correct = true;
+        for(let r=0; r<5; r++) {
+            for(let c=0; c<5; c++) {
+                if(layout[r][c] === 0) {
+                    const cell = getCellEl(r, c);
+                    if (gridState[r][c] !== solution[r][c]) {
+                        cell.style.color = 'red';
+                        correct = false;
+                    } else {
+                        cell.style.color = 'green';
+                    }
+                }
+            }
+        }
+        if(correct) alert("Congratulations! Puzzle Solved.");
+        else alert("Some answers are incorrect.");
+    }
+
+    // Start
+    initGame();
+
+</script>
+</body>
+</html>
